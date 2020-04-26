@@ -14,4 +14,3 @@ if [ "$1" = 'btc_oneshot' -a "$(id -u)" = '0' ]; then
 fi
 
 exec "$@"
-
