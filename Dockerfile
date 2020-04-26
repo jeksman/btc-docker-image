@@ -1,5 +1,5 @@
 FROM ubuntu:xenial
-MAINTAINER Eugene Kyselov <admin@profsite.com.ua>
+MAINTAINER Eugene Kyselev <admin@profsite.com.ua>
 
 ARG USER_ID
 ARG GROUP_ID
