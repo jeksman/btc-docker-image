@@ -1,54 +1,45 @@
-FROM ubuntu:xenial
-MAINTAINER Eugene Kyselev <admin@profsite.com.ua>
+FROM debian:bullseye-slim
 
-ARG USER_ID
-ARG GROUP_ID
+LABEL maintainer.0="Eugene Kyselev (admin@profiste.com.ua)"
 
-ENV HOME /bitcoin
+RUN useradd -r bitcoin \
+  && apt-get update -y \
+  && apt-get install -y curl gnupg gosu \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# add user with specified (or default) user/group ids
-ENV USER_ID ${USER_ID:-1000}
-ENV GROUP_ID ${GROUP_ID:-1000}
+ARG TARGETPLATFORM
+ENV BITCOIN_VERSION=0.19.1
+ENV BITCOIN_DATA=/home/bitcoin/.bitcoin
+ENV PATH=/opt/bitcoin-${BITCOIN_VERSION}/bin:$PATH
 
-# add our user and group first to make sure their IDs get assigned consistently, regardless of whatever dependencies get added
-RUN groupadd -g ${GROUP_ID} bitcoin \
-	&& useradd -u ${USER_ID} -g bitcoin -s /bin/bash -m -d /bitcoin bitcoin
+RUN set -ex \
+  && if [ "${TARGETPLATFORM}" = "linux/amd64" ]; then export TARGETPLATFORM=x86_64-linux-gnu; fi \
+  && if [ "${TARGETPLATFORM}" = "linux/arm64" ]; then export TARGETPLATFORM=aarch64-linux-gnu; fi \
+  && if [ "${TARGETPLATFORM}" = "linux/arm/v7" ]; then export TARGETPLATFORM=arm-linux-gnueabihf; fi \
+  && for key in \
+    01EA5486DE18A882D4C2684590C8019E36C2E964 \
+  ; do \
+      gpg --batch --keyserver keyserver.ubuntu.com --recv-keys "$key" || \
+      gpg --batch --keyserver pgp.mit.edu --recv-keys "$key" || \
+      gpg --batch --keyserver keyserver.pgp.com --recv-keys "$key" || \
+      gpg --batch --keyserver ha.pool.sks-keyservers.net --recv-keys "$key" || \
+      gpg --batch --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys "$key" ; \
+    done \
+  && curl -SLO https://bitcoin.org/bin/bitcoin-core-${BITCOIN_VERSION}/bitcoin-${BITCOIN_VERSION}-${TARGETPLATFORM}.tar.gz \
+  && curl -SLO https://bitcoin.org/bin/bitcoin-core-${BITCOIN_VERSION}/SHA256SUMS.asc \
+  && gpg --verify SHA256SUMS.asc \
+  && grep " bitcoin-${BITCOIN_VERSION}-${TARGETPLATFORM}.tar.gz\$" SHA256SUMS.asc | sha256sum -c - \
+  && tar -xzf *.tar.gz -C /opt \
+  && rm *.tar.gz *.asc \
+  && rm -rf /opt/bitcoin-${BITCOIN_VERSION}/bin/bitcoin-qt
 
-RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys C70EF1F0305A1ADB9986DBD8D46F45428842CE5E && \
-    echo "deb http://ppa.launchpad.net/bitcoin/bitcoin/ubuntu xenial main" > /etc/apt/sources.list.d/bitcoin.list
+COPY docker-entrypoint.sh /entrypoint.sh
 
-RUN apt-get update && apt-get install -y software-properties-common && apt-add-repository ppa:bitcoin/bitcoin && apt-get update && apt-get install -y --no-install-recommends \
-		bitcoind \
-	&& apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+VOLUME ["/home/bitcoin/.bitcoin"]
 
-# grab gosu for easy step-down from root
-ENV GOSU_VERSION 1.7
-RUN set -x \
-	&& apt-get update && apt-get install -y --no-install-recommends \
-		ca-certificates \
-		wget \
-	&& wget -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$(dpkg --print-architecture)" \
-	&& wget -O /usr/local/bin/gosu.asc "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$(dpkg --print-architecture).asc" \
-	&& export GNUPGHOME="$(mktemp -d)" \
-	&& gpg --keyserver ha.pool.sks-keyservers.net --recv-keys B42F6819007F00F88E364FD4036A9C25BF357DD4 \
-	&& gpg --batch --verify /usr/local/bin/gosu.asc /usr/local/bin/gosu \
-	&& rm -r "$GNUPGHOME" /usr/local/bin/gosu.asc \
-	&& chmod +x /usr/local/bin/gosu \
-	&& gosu nobody true \
-	&& apt-get purge -y \
-		ca-certificates \
-		wget \
-	&& apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+EXPOSE 8332 8333 18332 18333 18443 18444
 
-ADD ./bin /usr/local/bin
+ENTRYPOINT ["/entrypoint.sh"]
 
-VOLUME ["/bitcoin"]
-
-EXPOSE 8332 8333 18332 18333
-
-WORKDIR /bitcoin
-
-COPY docker-entrypoint.sh /usr/local/bin/
-ENTRYPOINT ["docker-entrypoint.sh"]
-
-CMD ["btc_oneshot"]
+CMD ["bitcoind"]
